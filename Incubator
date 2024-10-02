@@ -1,0 +1,203 @@
+class IncubatorSystem
+  attr_accessor :tamago_inventory, :data_inventory, :selected_tamago, :successful_injections
+
+  def initialize
+    # Aquí accedemos a los items TAMAGO y DATA correctamente
+    @tamago_inventory = get_tamago_items
+    @data_inventory = get_data_items
+    @selected_tamago = nil
+    @successful_injections = 0
+  end
+
+  # Paso 1: Verificar los items TAMAGO y DATA en la mochila
+  def check_inventory
+    if @tamago_inventory.empty?
+      pbMessage("No tienes huevos en tu inventario.")
+      return false
+    else
+      choose_tamago
+    end
+  end
+
+  # Obtener los items TAMAGO del inventario
+  def get_tamago_items
+    tamago_items = []
+    tamago_list = [:DRAGONSROAR_TAMAGO, :NATURESPIRIT_TAMAGO, :DEEPSAVERS_TAMAGO, 
+                   :NIGHTMARESOLDIERS_TAMAGO, :WINDGUARDIANS_TAMAGO, :METALEMPIRE_TAMAGO,
+                   :UNKNOWN_TAMAGO, :DARKAREA_TAMAGO, :JUNGLETROOPERS_TAMAGO]
+
+    tamago_list.each do |item|
+      if $PokemonBag.pbHasItem?(item)
+        tamago_items << item
+      end
+    end
+    return tamago_items
+  end
+
+  # Obtener los items DATA del inventario
+  def get_data_items
+    data_items = []
+    data_list = [:DRAGONSROAR_DATA, :NATURESPIRIT_DATA, :DEEPSAVERS_DATA, 
+                 :NIGHTMARESOLDIERS_DATA, :WINDGUARDIANS_DATA, :METALEMPIRE_DATA,
+                 :UNKNOWN_DATA, :DARKAREA_DATA, :JUNGLETROOPERS_DATA]
+
+    data_list.each do |item|
+      if $PokemonBag.pbHasItem?(item)
+        data_items << item
+      end
+    end
+    return data_items
+  end
+
+  # Paso 2: Seleccionar el TAMAGO
+  def choose_tamago
+    tamago_options = @tamago_inventory.map { |item| GameData::Item.get(item).name }
+    command = pbMessage("Tienes los siguientes TAMAGO disponibles: #{tamago_options.join(', ')}. ¿Cuál deseas incubar?", tamago_options, -1)
+    if command >= 0
+      @selected_tamago = @tamago_inventory[command]
+      pbMessage("Has seleccionado #{GameData::Item.get(@selected_tamago).name}.")
+      inject_data
+    else
+      pbMessage("No seleccionaste ningún TAMAGO.")
+    end
+  end
+
+  def inject_data
+    data_needed = get_data_needed(@selected_tamago)
+    if !@data_inventory.include?(data_needed)
+      pbMessage("No tienes DATA compatible con este TAMAGO.")
+      return
+    end
+
+    while @successful_injections < 5
+      pbMessage("Inyectando DATA...")
+
+      if @data_inventory.count(data_needed) < 1
+        pbMessage("No tienes suficientes DATA para continuar.")
+        return
+      end
+
+      # Seleccionar un ítem de DATA de la mochila
+      data_item = choose_data_item
+      return if !data_item  # Salir si no se seleccionó un ítem
+
+      if injection_success?
+        @successful_injections += 1
+        consume_data(data_item, 1)  # Consumir 1 ítem de DATA
+        pbMessage("Inyección exitosa! #{@successful_injections}/5.")
+
+        if @successful_injections >= 3 && @successful_injections < 5
+          pbMessage("El TAMAGO está listo para eclosionar. ¿Quieres eclosionarlo ahora o continuar inyectando?")
+          options = ["Eclosionar", "Continuar inyectando"]
+          choice = pbMessage("Elige una opción:", options, -1)
+
+          if choice == 0
+            hatch_tamago
+            return
+          elsif choice == 1
+            pbMessage("Continuando con las inyecciones.")
+          end
+        end
+      else
+        pbMessage("¡La inyección falló! El TAMAGO se rompió.")
+        break_tamago
+        return
+      end
+    end
+
+    if @successful_injections == 5
+      pbMessage("El TAMAGO ha alcanzado 5 inyecciones exitosas.")
+      hatch_tamago
+    end
+  end
+
+  # Método para elegir un ítem de DATA de la mochila
+  def choose_data_item
+    data_options = @data_inventory.map { |item| GameData::Item.get(item).name }
+    command = pbMessage("Selecciona un ítem de DATA:", data_options, -1)
+    if command >= 0
+      return @data_inventory[command]
+    end
+    nil  # Retornar nil si no se seleccionó nada
+  end
+
+  def injection_success?
+    base_chance = 0.8
+    extra_risk = @successful_injections >= 3 ? 0.4 : 0.0
+    success_chance = base_chance - extra_risk
+    rand <= success_chance
+  end
+
+  def adjust_stats(pokemon)
+    case @successful_injections
+    when 3
+    when 4
+      pokemon.stats.each { |stat| stat *= 2 }
+    when 5
+      pokemon.stats.each { |stat| stat *= 3 }
+    end
+  end
+
+  def consume_data(data_item, quantity)
+    quantity.times { @data_inventory.delete(data_item) }
+  end
+
+  def hatch_tamago
+    pbMessage("El TAMAGO está eclosionando...")
+    pokemon_species = choose_random_pokemon
+    pokemon = Pokemon.new(pokemon_species, 5)
+    adjust_stats(pokemon)
+    pbMessage("#{pokemon.name} ha nacido del TAMAGO.")
+    place_pokemon_in_party_or_pc(pokemon)
+    remove_tamago(@selected_tamago)
+  end
+
+  def choose_random_pokemon
+    possible_pokemons = [
+      { species: :PIKACHU, rookie_class: 'D' },
+      { species: :CHARMANDER, rookie_class: 'C' },
+      { species: :BULBASAUR, rookie_class: 'B' },
+      { species: :SQUIRTLE, rookie_class: 'A' },
+      { species: :DRAGONITE, rookie_class: 'SS' }
+    ]
+    probabilities = { 'D' => 0.5, 'C' => 0.3, 'B' => 0.15, 'A' => 0.04, 'SS' => 0.01 }
+    random_number = rand
+    chosen_class = probabilities.find { |_, chance| random_number <= chance }[0]
+    possible_pokemons.select { |poke| poke[:rookie_class] == chosen_class }.sample[:species]
+  end
+
+  def place_pokemon_in_party_or_pc(pokemon)
+    if $Trainer.party.length < 6
+      $Trainer.party << pokemon
+    else
+      pbMessage("Tu equipo está lleno. El Pokémon ha sido enviado al PC.")
+      $PokemonStorage.pbStoreCaught(pokemon)
+    end
+  end
+
+  def remove_tamago(tamago)
+    @tamago_inventory.delete(tamago)
+    pbMessage("#{GameData::Item.get(tamago).name} ha sido removido del inventario.")
+  end
+
+  def break_tamago
+    pbMessage("El TAMAGO se ha roto.")
+    remove_tamago(@selected_tamago)
+  end
+
+  def get_data_needed(tamago)
+    case tamago
+    when :DRAGONSROAR_TAMAGO then :DRAGONSROAR_DATA
+    when :NATURESPIRIT_TAMAGO then :NATURESPIRIT_DATA
+    when :DEEPSAVERS_TAMAGO then :DEEPSAVERS_DATA
+    when :NIGHTMARESOLDIERS_TAMAGO then :NIGHTMARESOLDIERS_DATA
+    when :WINDGUARDIANS_TAMAGO then :WINDGUARDIANS_DATA
+    when :METALEMPIRE_TAMAGO then :METALEMPIRE_DATA
+    when :UNKNOWN_TAMAGO then :UNKNOWN_DATA
+    when :DARKAREA_TAMAGO then :DARKAREA_DATA
+    when :JUNGLETROOPERS_TAMAGO then :JUNGLETROOPERS_DATA
+    else
+      nil
+    end
+  end
+end
